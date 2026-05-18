@@ -21,6 +21,26 @@ warn() { printf "${_Y}[CẢNH BÁO]${_0} %s\n" "$*"; }
 err()  { printf "${_R}[LỖI]${_0}      %s\n" "$*" >&2; }
 ok()   { printf "${_G}[OK]${_0}        %s\n" "$*"; }
 
+# ── Arg parsing ─────────────────────────────────────────────────────────────
+LOCAL_ISO=""
+
+print_help() {
+  printf "Usage: bash install.sh [OPTIONS]\n\n"
+  printf "Options:\n"
+  printf "  --local <path>    Dùng ISO local thay vì tải từ GitHub Releases (cho test/dev)\n"
+  printf "  -h, --help        Hiện trợ giúp\n\n"
+  printf "Mặc định: tải ISO latest từ GitHub Releases của VN-Linux-Family/CaramOS.\n"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --local) LOCAL_ISO="${2:-}"; shift 2 ;;
+    --local=*) LOCAL_ISO="${1#--local=}"; shift ;;
+    -h|--help) print_help; exit 0 ;;
+    *) err "Unknown arg: $1"; exit 1 ;;
+  esac
+done
+
 detect_os() {
   local kernel; kernel=$(uname -s)
   case "$kernel" in
@@ -308,6 +328,10 @@ print_boot_guide() {
 }
 
 prompt_cleanup_iso() {
+  if [[ -n "$LOCAL_ISO" ]]; then
+    info "Bỏ qua prompt cleanup (ISO local của bạn)"
+    return 0
+  fi
   printf "${_Y}Xóa ISO %s để tiết kiệm dung lượng? [y/N]: ${_0}" "$ISO_NAME"
   local ans; read -r ans || ans="N"; ans="${ans:-N}"
   if [[ "$ans" =~ ^[yY]$ ]]; then rm "$ISO_PATH" && ok "Đã xóa $ISO_PATH"
@@ -317,8 +341,18 @@ prompt_cleanup_iso() {
 # --- main: full flow (Phase 1: download+verify; Phase 2: USB write) -----------
 main() {
   info "=== CaramOS Installer ==="
-  detect_os; check_deps; ensure_iso_dir
-  fetch_release_meta; download_iso; verify_iso
+  detect_os; check_deps
+
+  if [[ -n "$LOCAL_ISO" ]]; then
+    [[ -f "$LOCAL_ISO" ]] || { err "ISO không tồn tại: $LOCAL_ISO"; exit 1; }
+    ISO_PATH="$(cd "$(dirname "$LOCAL_ISO")" && pwd)/$(basename "$LOCAL_ISO")"
+    ISO_NAME="$(basename "$LOCAL_ISO")"
+    info "Sử dụng ISO local: $ISO_PATH (bỏ qua download + SHA256 verify)"
+    warn "⚠️  Đang ở chế độ DEV — chỉ dùng ISO bạn tự build/tin tưởng"
+  else
+    ensure_iso_dir
+    fetch_release_meta; download_iso; verify_iso
+  fi
   ok "✓ ISO sẵn sàng: $ISO_PATH"
 
   _get_system_disk

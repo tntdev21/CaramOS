@@ -1,8 +1,23 @@
 #Requires -Version 5.1
 # CaramOS Windows Installer — tải ISO, xác minh SHA256, ghi USB qua Rufus portable.
 # PowerShell 5.1+, self-elevate UAC, tiếng Việt mọi message user-facing.
+param(
+    [string]$Local = ""
+)
 
 $ErrorActionPreference = 'Stop'
+
+function Show-Help {
+    Write-Host @"
+Usage: .\install.ps1 [-Local <path>]
+
+Options:
+  -Local <path>    Dùng ISO local thay vì tải từ GitHub Releases (cho test/dev)
+"@ -ForegroundColor Cyan
+}
+
+function Write-Info([string]$Msg)  { Write-Host $Msg -ForegroundColor Cyan }
+function Write-Warn([string]$Msg)  { Write-Host $Msg -ForegroundColor Yellow }
 
 function Set-Utf8Encoding {
     [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
@@ -183,6 +198,10 @@ function Show-BootGuide {
 }
 
 function Remove-IsoPrompt([string]$IsoPath) {
+    if ($Local) {
+        Write-Host "Bỏ qua cleanup ISO local" -ForegroundColor Gray
+        return
+    }
     if ((Read-Host "Xóa ISO để tiết kiệm dung lượng? [y/N]") -match '^[Yy]$') {
         Remove-Item $IsoPath -Force
         Write-Host "Đã xóa: $IsoPath" -ForegroundColor Green
@@ -200,17 +219,24 @@ Write-Host  "║        CaramOS — Trình cài đặt USB        ║" -Foregrou
 Write-Host  "╚══════════════════════════════════════════╝`n" -ForegroundColor Cyan
 
 try {
-    $meta   = Get-ReleaseMeta
-    Write-Host "Phiên bản: $($meta.Tag)  |  ISO: $($meta.IsoName)" -ForegroundColor Green
-
-    $isoDir  = New-IsoDir
-    Write-Host "Thư mục lưu: $isoDir"
-    Test-FreeSpace -Dir $isoDir
-
-    $isoPath = Join-Path $isoDir $meta.IsoName
-    Save-Iso           -Url $meta.IsoUrl -Destination $isoPath
-    Test-IsoChecksum   -ShaUrl $meta.ShaUrl -IsoPath $isoPath -IsoName $meta.IsoName -IsoDir $isoDir
-    $rufusExe = Save-Rufus -IsoDir $isoDir
+    if ($Local) {
+        if (-not (Test-Path $Local)) { throw "ISO không tồn tại: $Local" }
+        $isoPath = (Resolve-Path $Local).Path
+        $isoName = Split-Path $Local -Leaf
+        Write-Info "Sử dụng ISO local: $isoPath (bỏ qua download + SHA256)"
+        Write-Warn "Đang ở chế độ DEV — chỉ dùng ISO bạn tự build/tin tưởng"
+    } else {
+        $meta = Get-ReleaseMeta
+        Write-Host "Phiên bản: $($meta.Tag)  |  ISO: $($meta.IsoName)" -ForegroundColor Green
+        $isoDir  = New-IsoDir
+        Write-Host "Thư mục lưu: $isoDir"
+        Test-FreeSpace -Dir $isoDir
+        $isoPath = Join-Path $isoDir $meta.IsoName
+        Save-Iso         -Url $meta.IsoUrl -Destination $isoPath
+        Test-IsoChecksum -ShaUrl $meta.ShaUrl -IsoPath $isoPath -IsoName $meta.IsoName -IsoDir $isoDir
+        $isoName = $meta.IsoName
+    }
+    $rufusExe = Save-Rufus -IsoDir (Split-Path $isoPath -Parent)
 
     # Vòng lặp chọn USB
     $chosen = $null
