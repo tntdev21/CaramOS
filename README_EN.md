@@ -56,9 +56,67 @@ modern, and ready for Vietnamese users out of the box.
 
 ### Installation
 
-1. Download ISO from [caramos.vietnamlinuxfamily.net](https://caramos.vietnamlinuxfamily.net)
-2. Flash to USB with [Balena Etcher](https://etcher.balena.io) or `dd`
-3. Boot from USB, follow the installer (available in Vietnamese & English)
+#### Quick install (1 command) — recommended
+
+The script automatically detects your OS, downloads the latest ISO from GitHub Releases, verifies the SHA256 checksum, lists available USB devices, and safely writes the ISO after you confirm.
+
+**Linux/macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/VN-Linux-Family/CaramOS/main/install.sh -o install.sh
+bash install.sh
+```
+
+**Windows (PowerShell — run as Admin):**
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+irm https://raw.githubusercontent.com/VN-Linux-Family/CaramOS/main/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+**What the script does:**
+
+- Detects your OS (Linux, macOS, or Windows)
+- Downloads the latest ISO from GitHub Releases
+- Verifies file integrity with SHA256
+- Lists available USB devices for you to choose from
+- Writes the ISO to USB after you confirm the device name, then offers to clean up the ISO file
+
+> ⚠️ **The script will ERASE ALL DATA on the selected USB — back up first.**
+
+> 💡 It is recommended to download and review the script (`cat install.sh | less`) before running, rather than piping directly with `curl | bash`.
+
+---
+
+#### Manual install
+
+##### Download ISO
+
+Download the ISO from the project's GitHub Releases page once a release is available.
+
+##### Flash to USB (Linux/macOS)
+
+```bash
+sudo dd if=CaramOS-1.0.1-cinnamon-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+```
+
+Or use Balena Etcher/Ventoy on any OS.
+
+##### Flash to USB (Windows)
+
+1. Download [Rufus](https://rufus.ie).
+2. Open Rufus, select the CaramOS ISO file and the correct USB device.
+3. Click **START** and wait for the process to complete.
+
+---
+
+#### Boot and install
+
+1. Restart your machine and enter BIOS/UEFI using F2/F12/Del/Esc (varies by machine).
+2. Select boot from USB.
+3. Choose the live session or **Install CaramOS**.
+4. Follow the on-screen installation instructions.
 
 ### Caram Center — Windows Apps Made Easy
 

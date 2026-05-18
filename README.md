@@ -266,13 +266,46 @@ SHA256SUMS
 
 ## Cài đặt cho người dùng cuối
 
-### 1. Tải ISO
+### Cài đặt nhanh (1 lệnh) — khuyến nghị
+
+Script tự động phát hiện hệ điều hành, tải ISO mới nhất từ GitHub Releases, xác minh checksum SHA256, liệt kê thiết bị USB khả dụng và ghi ISO an toàn sau khi bạn xác nhận.
+
+**Linux/macOS:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/VN-Linux-Family/CaramOS/main/install.sh -o install.sh
+bash install.sh
+```
+
+**Windows (PowerShell — chạy với quyền Admin):**
+
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+irm https://raw.githubusercontent.com/VN-Linux-Family/CaramOS/main/install.ps1 -OutFile install.ps1
+.\install.ps1
+```
+
+**Script sẽ làm:**
+
+- Phát hiện hệ điều hành (Linux, macOS hoặc Windows)
+- Tải ISO phiên bản mới nhất từ GitHub Releases
+- Xác minh toàn vẹn file bằng SHA256
+- Liệt kê danh sách USB an toàn để bạn chọn
+- Ghi ISO ra USB sau khi bạn xác nhận tên thiết bị, đề nghị xoá file ISO sau khi xong
+
+> ⚠️ **Script sẽ XÓA TOÀN BỘ DATA trên USB được chọn — back up trước khi chạy.**
+
+> 💡 Khuyến nghị tải về xem nội dung (`cat install.sh | less`) trước khi chạy thay vì pipe trực tiếp `curl | bash`.
+
+---
+
+### Cài đặt thủ công
+
+#### Tải ISO
 
 Tải ISO từ trang GitHub Releases của dự án sau khi có bản phát hành.
 
-### 2. Ghi ra USB
-
-Linux/macOS:
+#### Ghi ra USB (Linux/macOS)
 
 ```bash
 sudo dd if=CaramOS-1.0.1-cinnamon-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
@@ -280,7 +313,15 @@ sudo dd if=CaramOS-1.0.1-cinnamon-amd64.iso of=/dev/sdX bs=4M status=progress of
 
 Hoặc dùng Balena Etcher/Ventoy trên mọi hệ điều hành.
 
-### 3. Boot và cài đặt
+#### Ghi ra USB (Windows)
+
+1. Tải [Rufus](https://rufus.ie) về máy.
+2. Mở Rufus, chọn file ISO CaramOS và chọn đúng thiết bị USB.
+3. Nhấn **START** và chờ quá trình hoàn tất.
+
+---
+
+### Boot và cài đặt
 
 1. Khởi động lại máy, vào BIOS/UEFI bằng F2/F12/Del/Esc tuỳ máy.
 2. Chọn boot từ USB.
