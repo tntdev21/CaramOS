@@ -1,0 +1,50 @@
+name: Installer Lint
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/installer-lint.yml'
+  pull_request:
+    paths:
+      - 'install.sh'
+      - 'install.ps1'
+      - '.github/workflows/installer-lint.yml'
+
+jobs:
+  shellcheck-install-sh:
+    name: ShellCheck install.sh
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck (fail on Warning+, log Info only)
+        run: shellcheck -S warning install.sh
+
+  psscriptanalyzer-install-ps1:
+    name: PSScriptAnalyzer install.ps1
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+
+      - name: Run PSScriptAnalyzer (fail on Error or Warning)
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path install.ps1 -Severity Error,Warning
+          if ($results) {
+            $results | Format-Table -AutoSize
+            Write-Error "PSScriptAnalyzer found $($results.Count) issue(s) in install.ps1"
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer: No issues found."
