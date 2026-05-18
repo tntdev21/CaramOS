@@ -33,11 +33,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y squashfs-tools xorriso rsync wget isolinux syslinux-utils
 
+      - name: Resolve Mint ISO filename from config
+        id: mint
+        run: |
+          source scripts/config.sh
+          echo "iso_name=${MINT_ISO_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${MINT_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "edition=${MINT_EDITION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache Mint ISO
         uses: actions/cache@v4
         with:
-          path: linuxmint-22.3-cinnamon-64bit.iso
-          key: mint-iso-22.3-cinnamon
+          path: ${{ steps.mint.outputs.iso_name }}
+          key: mint-iso-${{ steps.mint.outputs.version }}-${{ steps.mint.outputs.edition }}
 
       - name: Verify release tag matches source version
         if: startsWith(github.ref, 'refs/tags/v')
