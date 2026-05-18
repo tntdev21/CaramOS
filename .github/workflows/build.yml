@@ -108,27 +108,27 @@ jobs:
           DOWNLOAD_URL="https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/${GITHUB_REF_NAME}/${ISO_BASENAME}/download"
           CHECKSUM_URL="https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/${GITHUB_REF_NAME}/SHA256SUMS/download"
           cat > RELEASE_DOWNLOADS.md <<EOF
-## Download CaramOS ${GITHUB_REF_NAME}
+          ## Download CaramOS ${GITHUB_REF_NAME}
 
-> GitHub Release cannot host the ISO directly because release assets have a
-> per-file size limit. The ISO is hosted as one complete file on SourceForge.
+          **Note:** GitHub Release cannot host the ISO directly because release assets have a per-file size limit. The ISO is hosted as one complete file on SourceForge.
 
-<p align="center">
-  <a href="${DOWNLOAD_URL}">
-    <img src="https://img.shields.io/badge/Download-CaramOS%20ISO-ff6b00?style=for-the-badge&logo=linux&logoColor=white" alt="Download CaramOS ISO">
-  </a>
-</p>
+          <p align="center">
+            <a href="${DOWNLOAD_URL}">
+              <img src="https://img.shields.io/badge/Download-CaramOS%20ISO-ff6b00?style=for-the-badge&logo=linux&logoColor=white" alt="Download CaramOS ISO">
+            </a>
+          </p>
 
-- **ISO:** [${ISO_BASENAME}](${DOWNLOAD_URL})
-- **SHA256SUMS:** [SHA256SUMS](${CHECKSUM_URL})
-- **SourceForge folder:** https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/${GITHUB_REF_NAME}/
+          - **ISO:** [${ISO_BASENAME}](${DOWNLOAD_URL})
+          - **SHA256SUMS:** [SHA256SUMS](${CHECKSUM_URL})
+          - **SourceForge folder:** https://sourceforge.net/projects/${SOURCEFORGE_PROJECT}/files/${GITHUB_REF_NAME}/
 
-### Verify the ISO
+          ### Verify the ISO
 
-\`\`\`bash
-sha256sum -c SHA256SUMS
-\`\`\`
-EOF
+          \`\`\`bash
+          sha256sum -c SHA256SUMS
+          \`\`\`
+          EOF
+          sed -i 's/^          //' RELEASE_DOWNLOADS.md
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
