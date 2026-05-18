@@ -48,7 +48,7 @@ detect_os() {
       OS_KIND="Linux"; SHA_CMD="sha256sum"
       LIST_USB_CMD="lsblk -dpno NAME,SIZE,MODEL"; EJECT_CMD="eject" ;;
     Darwin)
-      OS_KIND="Darwin"; SHA_CMD="shasum -a 256"
+      OS_KIND="macOS"; SHA_CMD="shasum -a 256"
       LIST_USB_CMD="diskutil list external"; EJECT_CMD="diskutil eject" ;;
     *)
       err "Hệ điều hành '$kernel' chưa được hỗ trợ. Chỉ hỗ trợ Linux và macOS."
@@ -177,7 +177,7 @@ verify_iso() {
 }
 
 # Phase 2 runtime vars
-USB_LIST=() SYSTEM_DISK="" USB_DEV="" USB_DEV_SIZE="" USB_DEV_MODEL=""
+USB_LIST=() SYSTEM_DISK="" USB_DEV="" USB_DEV_SIZE="" USB_DEV_MODEL="" USB_DEV_LABEL=""
 
 _get_system_disk() {
   if [[ "$OS_KIND" == "Linux" ]]; then
@@ -189,33 +189,48 @@ _get_system_disk() {
 
 list_usb_devices() {
   USB_LIST=()
-  printf "\n${_C}%-4s %-12s %-10s %s${_0}\n" "#" "THIẾT BỊ" "DUNG LƯỢNG" "MODEL"
-  printf "%s\n" "--------------------------------------------"
+  printf "\n${_C}%-4s %-20s %-14s %-10s %s${_0}\n" "#" "TÊN (LABEL)" "THIẾT BỊ" "DUNG LƯỢNG" "MODEL"
+  printf "%s\n" "-------------------------------------------------------------------------"
   local idx=0
   if [[ "$OS_KIND" == "Linux" ]]; then
     while IFS= read -r line; do
       [[ -z "$line" ]] && continue
       local name size tran rm model
-      # MODEL ở cuối để hứng toàn bộ phần còn lại (xử lý model có khoảng trắng, vd "SanDisk Ultra Fit")
+      # MODEL ở cuối để hứng phần còn lại (model có thể chứa khoảng trắng)
       read -r name size tran rm model <<< "$line"
       [[ "$tran" != "usb" || "$rm" != "1" ]] && continue
+      # Volume label: lấy partition đầu tiên có LABEL non-empty
+      local label
+      label=$(lsblk -nlo LABEL "/dev/$name" 2>/dev/null | awk 'NF{print; exit}')
+      [[ -z "$label" ]] && label="(trống)"
       idx=$(( idx + 1 ))
-      USB_LIST+=("${name}:${size}:${model}")
-      printf "%-4s %-12s %-10s %s\n" "$idx" "/dev/$name" "$size" "$model"
+      USB_LIST+=("${name}:${size}:${label}:${model}")
+      printf "%-4s %-20s %-14s %-10s %s\n" "$idx" "$label" "/dev/$name" "$size" "$model"
     done < <(lsblk -d -no NAME,SIZE,TRAN,RM,MODEL 2>/dev/null)
   else
     while IFS= read -r line; do
-      local disk; disk=$(printf '%s' "$line" | grep -oE 'disk[0-9]+$' | head -1 || true)
+      # Line format on macOS: "/dev/disk5 (external, physical):"
+      local disk; disk=$(printf '%s' "$line" | grep -oE 'disk[0-9]+' | head -1 || true)
       [[ -z "$disk" ]] && continue
       local dinfo; dinfo=$(diskutil info "/dev/$disk" 2>/dev/null || true)
       local size; size=$(printf '%s' "$dinfo" | grep "Disk Size" | awk '{print $3,$4}')
       local model; model=$(printf '%s' "$dinfo" | grep "Device / Media Name" | cut -d: -f2 | xargs)
+      # Volume label: tìm partition đầu có Volume Name
+      local label=""
+      local p
+      for p in $(diskutil list "/dev/$disk" 2>/dev/null | awk '/^ *[0-9]+:/ {print $NF}' | grep -E "^${disk}s[0-9]+$"); do
+        local vname; vname=$(diskutil info "/dev/$p" 2>/dev/null | awk -F: '/Volume Name/ {sub(/^ +/,"",$2); print $2; exit}')
+        if [[ -n "$vname" && "$vname" != "Not applicable (no file system)" ]]; then
+          label="$vname"; break
+        fi
+      done
+      [[ -z "$label" ]] && label="(trống)"
       idx=$(( idx + 1 ))
-      USB_LIST+=("${disk}:${size}:${model}")
-      printf "%-4s %-12s %-10s %s\n" "$idx" "/dev/$disk" "$size" "$model"
+      USB_LIST+=("${disk}:${size}:${label}:${model}")
+      printf "%-4s %-20s %-14s %-10s %s\n" "$idx" "$label" "/dev/$disk" "$size" "$model"
     done < <(diskutil list external physical 2>/dev/null | grep "^/dev/" || true)
   fi
-  printf "%s\n\n" "--------------------------------------------"
+  printf "%s\n\n" "-------------------------------------------------------------------------"
 }
 
 validate_device() {
@@ -224,14 +239,16 @@ validate_device() {
   if ! [[ "$name" =~ ^[a-z][a-z0-9]+$ ]]; then
     err "Tên thiết bị không hợp lệ: '$name'. Chỉ chấp nhận dạng sdb, disk4, nvme0n1, ..."; return 1
   fi
-  [[ ! -b "/dev/$name" ]] && { err "Thiết bị /dev/$name không tồn tại."; return 1; }
+  # macOS: /dev/diskN is a character device (-c), Linux: block device (-b). Accept either.
+  [[ ! -b "/dev/$name" && ! -c "/dev/$name" ]] && { err "Thiết bị /dev/$name không tồn tại."; return 1; }
   [[ -n "$SYSTEM_DISK" && "$name" == "$SYSTEM_DISK" ]] && {
     err "Đây là ổ cứng hệ thống ($SYSTEM_DISK), từ chối. Vui lòng chọn USB khác."; return 1; }
   local found=0
   for entry in "${USB_LIST[@]}"; do
     [[ "${entry%%:*}" == "$name" ]] || continue
     found=1; USB_DEV_SIZE=$(printf '%s' "$entry" | cut -d: -f2)
-    USB_DEV_MODEL=$(printf '%s' "$entry" | cut -d: -f3-); break
+    USB_DEV_LABEL=$(printf '%s' "$entry" | cut -d: -f3)
+    USB_DEV_MODEL=$(printf '%s' "$entry" | cut -d: -f4-); break
   done
   [[ $found -eq 0 ]] && { err "/dev/$name không nằm trong danh sách USB tháo rời."; return 1; }
   local size_bytes=0
@@ -248,9 +265,11 @@ validate_device() {
 
 prompt_device() {
   while true; do
-    printf "${_Y}Gõ tên thiết bị USB (vd: sdb hoặc disk4): ${_0}"
+    printf "${_Y}Gõ tên hoặc đường dẫn thiết bị USB (vd: disk5 hoặc /dev/disk5): ${_0}"
     local input; read -r input || { err "Không đọc được input."; return 1; }
     input="${input// /}"
+    # Accept full path /dev/diskN — strip /dev/ prefix
+    input="${input#/dev/}"
     validate_device "$input" && USB_DEV="$input" && return 0
     warn "Thử lại."
   done
@@ -262,32 +281,120 @@ unmount_device_parts() {
     lsblk -nlo NAME "/dev/$1" 2>/dev/null | tail -n +2 \
       | xargs -I{} sudo umount "/dev/{}" 2>/dev/null || true
   else
-    sudo diskutil unmountDisk "/dev/$1" 2>/dev/null || true
+    sudo diskutil unmountDisk "/dev/$1" >/dev/null 2>&1 || true
   fi
   ok "Đã ngắt kết nối."
 }
 
 confirm_write() {
   while true; do
-    printf "\n${_R}⚠️  Sẽ XÓA TOÀN BỘ /dev/%s (%s %s).${_0}\n" "$1" "$USB_DEV_SIZE" "$USB_DEV_MODEL"
-    printf "${_Y}Tiếp tục? [y/N]: ${_0}"; local ans; read -r ans || ans="N"; ans="${ans:-N}"
+    local display="${USB_DEV_LABEL:-/dev/$1}"
+    [[ "$display" == "(trống)" ]] && display="/dev/$1"
+    printf "\n${_R}⚠️  Sẽ XÓA TOÀN BỘ %s (%s %s).${_0}\n" "$display" "$USB_DEV_SIZE" "$USB_DEV_MODEL"
+    printf "${_R}\033[1m   Nhấn Enter để tiếp tục (XÓA), hoặc gõ N để hủy.${_0}\n"
+    printf "${_Y}Tiếp tục? [Y/n]: ${_0}"; local ans; read -r ans || ans="Y"; ans="${ans:-Y}"
     case "$ans" in
       [yY]) return 0 ;;
       [nN]) err "Đã hủy. Không có gì bị thay đổi."; return 1 ;;
-      *)    warn "Vui lòng nhập y hoặc N." ;;
+      *)    warn "Vui lòng nhập Y hoặc N." ;;
     esac
   done
 }
 
+_format_eta() {
+  # input: seconds (int); output: "Xm Ys" hoặc "Ys"
+  local s=$1
+  if [[ "$s" -ge 60 ]]; then printf "%dm %02ds" $((s/60)) $((s%60)); else printf "%ds" "$s"; fi
+}
+
+_render_progress() {
+  # args: bytes_done total_bytes speed_mbps eta_seconds
+  local done=$1 total=$2 speed=$3 eta=$4
+  local pct="0.000" done_gb total_gb
+  # awk dùng để chia float — bash int chia không có thập phân
+  [[ "$total" -gt 0 ]] && pct=$(awk -v d="$done" -v t="$total" 'BEGIN{printf "%.3f", d*100/t}')
+  done_gb=$(awk -v b="$done" 'BEGIN{printf "%.2f", b/1073741824}')
+  total_gb=$(awk -v b="$total" 'BEGIN{printf "%.2f", b/1073741824}')
+  # \r overwrite cùng dòng + \033[K xoá phần thừa cuối dòng
+  printf "\r\033[K${_C}[GHI]${_0}       %s%% (%s/%s GB), tốc độ %s MB/s, dự kiến xong trong %s" \
+    "$pct" "$done_gb" "$total_gb" "$speed" "$(_format_eta "$eta")"
+}
+
 write_iso_to_usb() {
-  info "Đang ghi ISO vào /dev/$1 — KHÔNG rút USB trong lúc ghi..."
+  # \033[1;31m = bold red; giữ phong cách [INFO] cyan
+  printf "${_C}[INFO]      Đang ghi ISO vào /dev/%s — \033[1;31mKHÔNG rút USB\033[0m${_C} trong lúc ghi...${_0}\n" "$1"
+  local total_bytes target sig
   if [[ "$OS_KIND" == "Linux" ]]; then
-    sudo dd if="$ISO_PATH" of="/dev/$1" bs=4M status=progress conv=fsync
+    total_bytes=$(stat -c%s "$ISO_PATH"); target="/dev/$1"; sig="USR1"
   else
-    # macOS: raw device /dev/rdiskN is ~10x faster than /dev/diskN; no status=progress flag
-    info "Đang ghi USB, vui lòng chờ (có thể mất vài phút)..."
-    sudo dd if="$ISO_PATH" of="/dev/r${1}" bs=4m
+    total_bytes=$(stat -f%z "$ISO_PATH"); target="/dev/r${1}"; sig="INFO"
   fi
+  local tmpf; tmpf=$(mktemp -t carambos-dd.XXXXXX)
+  # Linux dd: bs=4M; macOS dd: bs=4m
+  local bs="4M"; [[ "$OS_KIND" != "Linux" ]] && bs="4m"
+  local extra=""; [[ "$OS_KIND" == "Linux" ]] && extra="conv=fsync"
+  # shellcheck disable=SC2086
+  sudo dd if="$ISO_PATH" of="$target" bs="$bs" $extra 2>"$tmpf" &
+  local sudo_pid=$!
+  # PID thật của dd là con của sudo; signal phải gửi tới dd, không phải sudo
+  # Thử pgrep -P trước; macOS đôi khi không thấy child do quyền → fallback pgrep -x dd của user root
+  local dd_pid=""
+  local tries=0
+  while [[ -z "$dd_pid" && "$tries" -lt 30 ]]; do
+    sleep 0.1
+    dd_pid=$(pgrep -P "$sudo_pid" -x dd 2>/dev/null | head -1 || true)
+    if [[ -z "$dd_pid" ]]; then
+      # Fallback: tìm dd process gần nhất đang ghi vào target
+      dd_pid=$(sudo pgrep -nx dd 2>/dev/null | head -1 || true)
+    fi
+    tries=$((tries+1))
+  done
+  [[ -z "$dd_pid" ]] && dd_pid="$sudo_pid"
+  local prev_bytes=0 prev_t shown=0
+  # date +%s.%N hỗ trợ trên Linux; macOS BSD date không có %N → dùng python/perl fallback
+  if date +%s.%N 2>/dev/null | grep -q '\.'; then
+    prev_t=$(date +%s.%N)
+    _NOW_CMD='date +%s.%N'
+  elif command -v python3 >/dev/null 2>&1; then
+    _NOW_CMD='python3 -c "import time;print(time.time())"'
+    prev_t=$(eval "$_NOW_CMD")
+  else
+    _NOW_CMD='date +%s'
+    prev_t=$(eval "$_NOW_CMD")
+  fi
+  # 2 nhịp: % refresh nhanh 0.02s; speed/ETA tính + cache mỗi ~2s (bytes thay đổi nhanh nhưng tốc độ ổn định)
+  local cached_speed=0 cached_eta=0
+  local SPEED_INTERVAL=3
+  while kill -0 "$sudo_pid" 2>/dev/null; do
+    sleep 0.02
+    sudo kill -"$sig" "$dd_pid" 2>/dev/null || true
+    local line bytes_done
+    line=$(grep -aE '^[0-9]+ bytes' "$tmpf" 2>/dev/null | tail -1 || true)
+    [[ -z "$line" ]] && continue
+    bytes_done=$(printf '%s' "$line" | awk '{print $1}')
+    [[ -z "$bytes_done" || ! "$bytes_done" =~ ^[0-9]+$ ]] && continue
+    [[ "$bytes_done" -eq 0 ]] && continue
+    local now dt_int
+    now=$(eval "$_NOW_CMD")
+    dt_int=$(awk -v p="$prev_t" -v n="$now" 'BEGIN{printf "%d", n-p}')
+    # Tính speed + ETA: ngay lần đầu (chưa hiển thị) HOẶC khi đã đủ SPEED_INTERVAL giây từ lần cập nhật trước
+    if [[ "$shown" -eq 0 || "$dt_int" -ge "$SPEED_INTERVAL" ]]; then
+      local db remain
+      db=$(( bytes_done - prev_bytes ))
+      cached_speed=$(awk -v db="$db" -v p="$prev_t" -v n="$now" 'BEGIN{dt=n-p; if(dt<0.05)dt=0.05; printf "%d", db/dt/1048576}')
+      [[ "$cached_speed" -lt 1 && "$bytes_done" -gt "$prev_bytes" ]] && cached_speed=1
+      remain=$(( total_bytes - bytes_done ))
+      if [[ "$cached_speed" -gt 0 ]]; then cached_eta=$(( remain / 1048576 / cached_speed )); else cached_eta=0; fi
+      prev_bytes=$bytes_done; prev_t=$now
+    fi
+    _render_progress "$bytes_done" "$total_bytes" "$cached_speed" "$cached_eta"
+    shown=1
+  done
+  wait "$sudo_pid" || { [[ "$shown" -eq 1 ]] && printf "\n"; rm -f "$tmpf"; err "dd thất bại."; return 1; }
+  # Line cuối: chỉ % + dung lượng, bỏ speed/ETA vì đã xong
+  local total_gb; total_gb=$(awk -v b="$total_bytes" 'BEGIN{printf "%.2f", b/1073741824}')
+  printf "\r\033[K${_C}[GHI]${_0}       100%% (%s/%s GB)\n" "$total_gb" "$total_gb"
+  rm -f "$tmpf"
   sync; ok "Ghi ISO hoàn tất."
 }
 
@@ -304,19 +411,19 @@ eject_device() {
   info "Đang eject /dev/$1..."
   if [[ "$OS_KIND" == "Linux" ]]; then
     command -v udisksctl >/dev/null 2>&1 \
-      && sudo udisksctl power-off -b "/dev/$1" 2>/dev/null && ok "Đã eject." && return 0
+      && sudo udisksctl power-off -b "/dev/$1" >/dev/null 2>&1 && ok "Đã eject." && return 0
     sync; command -v eject >/dev/null 2>&1 \
-      && sudo eject "/dev/$1" 2>/dev/null && ok "Đã eject." && return 0
+      && sudo eject "/dev/$1" >/dev/null 2>&1 && ok "Đã eject." && return 0
     warn "Không tự eject được. Vui lòng rút USB ra bằng tay."
   else
-    sudo diskutil eject "/dev/$1" 2>/dev/null && ok "Đã eject." \
+    sudo diskutil eject "/dev/$1" >/dev/null 2>&1 && ok "Đã eject." \
       || warn "Không tự eject được. Vui lòng rút USB ra bằng tay."
   fi
 }
 
 print_boot_guide() {
   printf "\n${_G}╔══════════════════════════════════════════════╗${_0}\n"
-  printf   "${_G}║     HƯỚNG DẪN KHỞI ĐỘNG TỪ USB              ║${_0}\n"
+  printf   "${_G}║     HƯỚNG DẪN KHỞI ĐỘNG TỪ USB               ║${_0}\n"
   printf   "${_G}╚══════════════════════════════════════════════╝${_0}\n"
   printf "1. Cắm USB vào máy tính cần cài CaramOS.\n"
   printf "2. Khởi động lại, nhấn phím vào Boot Menu:\n"
@@ -343,6 +450,22 @@ main() {
   info "=== CaramOS Installer ==="
   detect_os; check_deps
 
+  # Guardrail: detect USB + user xác nhận chọn device TRƯỚC khi tải/verify ISO.
+  # Lý do: tránh user tải 3GB rồi mới phát hiện không có USB.
+  _get_system_disk
+  while true; do
+    info "Quét thiết bị USB đang kết nối..."
+    list_usb_devices
+    if [[ ${#USB_LIST[@]} -eq 0 ]]; then
+      err "Không tìm thấy USB nào đang kết nối."
+      warn "Vui lòng cắm USB (≥ 4GB) rồi nhấn Enter để quét lại (hoặc Ctrl+C để thoát)..."
+      read -r _ || true; continue
+    fi
+    prompt_device && break
+  done
+  confirm_write "$USB_DEV"
+  ok "Đã xác nhận USB: /dev/$USB_DEV"
+
   if [[ -n "$LOCAL_ISO" ]]; then
     [[ -f "$LOCAL_ISO" ]] || { err "ISO không tồn tại: $LOCAL_ISO"; exit 1; }
     ISO_PATH="$(cd "$(dirname "$LOCAL_ISO")" && pwd)/$(basename "$LOCAL_ISO")"
@@ -355,19 +478,7 @@ main() {
   fi
   ok "✓ ISO sẵn sàng: $ISO_PATH"
 
-  _get_system_disk
-  while true; do
-    info "Quét thiết bị USB đang kết nối..."
-    list_usb_devices
-    if [[ ${#USB_LIST[@]} -eq 0 ]]; then
-      warn "Không tìm thấy USB nào. Cắm USB rồi nhấn Enter để quét lại..."
-      read -r _ || true; continue
-    fi
-    prompt_device && break
-  done
-
   unmount_device_parts "$USB_DEV"
-  confirm_write "$USB_DEV"
   write_iso_to_usb "$USB_DEV"
   verify_usb_write "$USB_DEV"
   eject_device "$USB_DEV"
